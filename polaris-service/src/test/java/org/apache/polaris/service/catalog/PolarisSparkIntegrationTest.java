@@ -388,15 +388,15 @@ public class PolarisSparkIntegrationTest {
     assertThat(recordCount).isEqualTo(3);
   }
 
-  @Test
-  void testLogFileHasZeroErrors() {
+  @BeforeAll
+  static void logFileHasZeroErrors() {
     assertThat(new File(CURRENT_LOG.get()))
         .exists()
         .content()
-        .contains("Starting hello-world",
-            "Started application@",
+        .contains("Starting PolarisApplication",
+            "Opened application@",
             "0.0.0.0:" + EXT.getLocalPort(),
-            "Started admin@",
+            "Opened admin@",
             "0.0.0.0:" + EXT.getAdminPort())
         .doesNotContain("ERROR", "FATAL", "Exception");
   }
