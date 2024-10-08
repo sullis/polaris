@@ -29,10 +29,13 @@ import io.dropwizard.testing.junit5.DropwizardAppExtension;
 import io.dropwizard.testing.junit5.DropwizardExtensionsSupport;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Response;
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.apache.iceberg.rest.requests.ImmutableRegisterTableRequest;
 import org.apache.iceberg.rest.responses.LoadTableResponse;
 import org.apache.polaris.core.admin.model.AwsStorageConfigInfo;
@@ -58,10 +61,16 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 
 @ExtendWith({DropwizardExtensionsSupport.class, PolarisConnectionExtension.class})
 public class PolarisSparkIntegrationTest {
+  @TempDir
+  private static Path tempDir;
+  private static Supplier<String> CURRENT_LOG = () -> tempDir.resolve("application.log").toString();
+  private static Supplier<String> ARCHIVED_LOG = () -> tempDir.resolve("application-%d-%i.log.gz").toString();
+
   private static final DropwizardAppExtension<PolarisApplicationConfig> EXT =
       new DropwizardAppExtension<>(
           PolarisApplication.class,
@@ -70,7 +79,15 @@ public class PolarisSparkIntegrationTest {
               "server.applicationConnectors[0].port",
               "0"), // Bind to random port to support parallelism
           ConfigOverride.config(
-              "server.adminConnectors[0].port", "0")); // Bind to random port to support parallelism
+              "server.adminConnectors[0].port", "0"), // Bind to random port to support parallelism
+          ConfigOverride.config(
+              "logging.appenders[1].type", "file"),
+          ConfigOverride.config(
+              "logging.appenders[1].currentLogFilename", CURRENT_LOG),
+          ConfigOverride.config(
+              "logging.appenders[1].archivedLogFilenamePattern", ARCHIVED_LOG),
+          ConfigOverride.config(
+              "logging.appenders[1].maxFileSize", "2000000"));
 
   public static final String CATALOG_NAME = "mycatalog";
   public static final String EXTERNAL_CATALOG_NAME = "external_catalog";
@@ -369,6 +386,19 @@ public class PolarisSparkIntegrationTest {
     onSpark("CREATE VIEW view1 AS SELECT * FROM tb1");
     long recordCount = onSpark("SELECT * FROM view1").count();
     assertThat(recordCount).isEqualTo(3);
+  }
+
+  @Test
+  void testLogFileHasZeroErrors() {
+    assertThat(new File(CURRENT_LOG.get()))
+        .exists()
+        .content()
+        .contains("Starting hello-world",
+            "Started application@",
+            "0.0.0.0:" + EXT.getLocalPort(),
+            "Started admin@",
+            "0.0.0.0:" + EXT.getAdminPort())
+        .doesNotContain("ERROR", "FATAL", "Exception");
   }
 
   private LoadTableResponse loadTable(String catalog, String namespace, String table) {
